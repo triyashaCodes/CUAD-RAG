@@ -1,20 +1,36 @@
 import os
 import json
+import sys
+from pathlib import Path
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_community.vectorstores import FAISS
-from langchain.text_splitter.recursive import RecursiveCharacterTextSplitter
+from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.chains import RetrievalQA
 from langchain.schema import Document
 from benchmark_types import Benchmark
 
+# Handle Colab vs local paths
+if 'google.colab' in sys.modules:
+    # In Colab, detect project directory
+    current_dir = Path.cwd()
+    if (current_dir / 'generate_cuad.py').exists():
+        BASE_DIR = current_dir
+    else:
+        BASE_DIR = Path('/content')
+        print("Warning: Using /content as BASE_DIR. Make sure you're in the project directory.")
+    print("Running in Google Colab")
+else:
+    BASE_DIR = Path(__file__).parent
+    print("Running locally")
+
 # -----------------------------
 # 1. Load corpus
 # -----------------------------
-corpus_dir = "./data/corpus/cuad/"
+corpus_dir = BASE_DIR / "data" / "corpus" / "cuad"
 documents = []
 for filename in os.listdir(corpus_dir):
     if filename.endswith(".txt"):
-        filepath = os.path.join(corpus_dir, filename)
+        filepath = corpus_dir / filename
         with open(filepath, "r", encoding="utf-8") as f:
             content = f.read()
             # Create Document objects with metadata
@@ -58,8 +74,10 @@ qa_chain = RetrievalQA.from_chain_type(
 # 5. Save the pipeline for evaluation
 # -----------------------------
 # Save vectorstore and chain for later use
-vectorstore.save_local("./data/vectorstores/langchain_faiss")
-print("Vector store saved to ./data/vectorstores/langchain_faiss")
+vectorstore_dir = BASE_DIR / "data" / "vectorstores"
+vectorstore_dir.mkdir(parents=True, exist_ok=True)
+vectorstore.save_local(str(vectorstore_dir / "langchain_faiss"))
+print(f"Vector store saved to {vectorstore_dir / 'langchain_faiss'}")
 
 # Export the qa_chain (you'll reload it in evaluation script)
 # Note: You'll need to recreate the chain in evaluation script with same config

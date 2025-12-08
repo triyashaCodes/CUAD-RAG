@@ -2,8 +2,10 @@ import ast
 import asyncio
 import os
 import shutil
+import sys
 from collections.abc import Coroutine
 from typing import Any, cast
+from pathlib import Path
 
 import pandas as pd
 
@@ -15,14 +17,26 @@ from benchmark_types import (
 )
 from utils import WRITE_TITLES, create_title, download_zip
 
-save_path = "./data/raw_data/cuad"
+# Handle Colab vs local paths
+if 'google.colab' in sys.modules:
+    current_dir = Path.cwd()
+    if (current_dir / 'generate_cuad.py').exists():
+        BASE_DIR = current_dir
+    else:
+        BASE_DIR = Path('/content')
+    print("Running in Google Colab")
+else:
+    BASE_DIR = Path(__file__).parent
+    print("Running locally")
+
+save_path = BASE_DIR / "data" / "raw_data" / "cuad"
 
 
 def download_cuad() -> None:
     download_zip(
         name="CUAD",
         url="https://zenodo.org/record/4595826/files/CUAD_v1.zip?download=1",
-        save_path=save_path,
+        save_path=str(save_path),
         check_path="CUAD_v1",
     )
 
@@ -48,7 +62,7 @@ def extract_quote_span(text: str, quote: str) -> tuple[int, int] | None:
 async def generate_cuad() -> None:
     download_cuad()
 
-    df = pd.read_csv(f"{save_path}/CUAD_v1/master_clauses.csv")
+    df = pd.read_csv(save_path / "CUAD_v1" / "master_clauses.csv")
     # Agreement Date - The snippet is too exact
     # Effective Date - The snippet is too exact
 
@@ -62,8 +76,8 @@ async def generate_cuad() -> None:
             filename = filename_pdf_to_text(cast(str, row["Filename"]))
             if ".txt" not in filename:
                 continue
-            filepath = f"{save_path}/CUAD_v1/full_contract_txt/{filename}"
-            if not os.path.exists(filepath):
+            filepath = save_path / "CUAD_v1" / "full_contract_txt" / filename
+            if not filepath.exists():
                 continue
             with open(filepath) as f:
                 text = f.read()
@@ -82,8 +96,8 @@ async def generate_cuad() -> None:
             filename = filename_pdf_to_text(cast(str, row["Filename"]))
             if ".txt" not in filename:
                 continue
-            filepath = f"{save_path}/CUAD_v1/full_contract_txt/{filename}"
-            if not os.path.exists(filepath):
+            filepath = save_path / "CUAD_v1" / "full_contract_txt" / filename
+            if not filepath.exists():
                 continue
             # Use filename as title (remove extension, clean up)
             simple_title = filename.replace(".txt", "").replace("_", " ").title()
@@ -114,8 +128,9 @@ async def generate_cuad() -> None:
         filtered_extracted_rows.append(extracted_row)
 
     if WRITE_TITLES:
-        os.makedirs("./tmp", exist_ok=True)
-        with open("./tmp/cuad_titles.txt", "w") as f:
+        tmp_dir = BASE_DIR / "tmp"
+        tmp_dir.mkdir(exist_ok=True)
+        with open(tmp_dir / "cuad_titles.txt", "w") as f:
             for i, title in filtered_extracted_rows:
                 f.write(f"{i}: {df.loc[i, "Filename"]} -> {title}\n")
 
@@ -163,7 +178,8 @@ async def generate_cuad() -> None:
     for i, generated_title in filtered_extracted_rows:
         row = df.iloc[i]
         filename = filename_pdf_to_text(cast(str, row["Filename"]))
-        with open(f"{save_path}/CUAD_v1/full_contract_txt/{filename}") as f:
+        filepath = save_path / "CUAD_v1" / "full_contract_txt" / filename
+        with open(filepath) as f:
             text = f.read()
         for column_name, column_query in column_queries.items():
             # Parse the quotes
@@ -210,17 +226,16 @@ async def generate_cuad() -> None:
                     )
                 )
 
-    corpus_dir = "./data/corpus/cuad"
-    os.makedirs(corpus_dir, exist_ok=True)
+    corpus_dir = BASE_DIR / "data" / "corpus" / "cuad"
+    corpus_dir.mkdir(parents=True, exist_ok=True)
     for used_filename in used_filenames:
-        shutil.copy(
-            f"{save_path}/CUAD_v1/full_contract_txt/{used_filename}",
-            f"{corpus_dir}/{used_filename}",
-        )
+        src = save_path / "CUAD_v1" / "full_contract_txt" / used_filename
+        dst = corpus_dir / used_filename
+        shutil.copy(src, dst)
 
-    benchmark_dir = "./data/benchmarks"
-    os.makedirs(benchmark_dir, exist_ok=True)
-    with open(f"{benchmark_dir}/cuad.json", "w") as f:
+    benchmark_dir = BASE_DIR / "data" / "benchmarks"
+    benchmark_dir.mkdir(parents=True, exist_ok=True)
+    with open(benchmark_dir / "cuad.json", "w") as f:
         f.write(Benchmark(tests=qa_list).model_dump_json(indent=4))
 
 

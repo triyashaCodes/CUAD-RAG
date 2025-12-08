@@ -1,21 +1,39 @@
 import os
 import json
 import time
+import sys
 from typing import List, Dict
+from pathlib import Path
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain.chains import RetrievalQA
 from benchmark_types import Benchmark, QAGroundTruth
-import wandb
+
+try:
+    import wandb
+    WANDB_AVAILABLE = True
+except ImportError:
+    WANDB_AVAILABLE = False
+    print("Warning: wandb not available. Metrics will not be logged.")
+
+# Handle Colab vs local paths
+if 'google.colab' in sys.modules:
+    # In Colab, detect project directory
+    current_dir = Path.cwd()
+    if (current_dir / 'generate_cuad.py').exists():
+        BASE_DIR = current_dir
+    else:
+        BASE_DIR = Path('/content')
+        print("Warning: Using /content as BASE_DIR. Make sure you're in the project directory.")
+    print("Running in Google Colab")
+else:
+    BASE_DIR = Path(__file__).parent
+    print("Running locally")
 
 
 # -----------------------------
 # Evaluation Metrics
 # -----------------------------
-
-def exact_match(predicted: str, gold: str) -> float:
-    """Calculate exact match score."""
-    return 1.0 if predicted.strip().lower() == gold.strip().lower() else 0.0
 
 
 def f1_score(predicted: str, gold: str) -> float:
@@ -43,9 +61,10 @@ def retrieval_recall(retrieved_chunks: List[str], gold_snippets: List[Dict], k: 
     
     # Get gold text content
     gold_texts = []
+    corpus_base = BASE_DIR / "data" / "corpus"
     for snippet in gold_snippets:
-        filepath = os.path.join("./data/corpus", snippet["file_path"])
-        if os.path.exists(filepath):
+        filepath = corpus_base / snippet["file_path"]
+        if filepath.exists():
             with open(filepath, "r", encoding="utf-8") as f:
                 text = f.read()
                 gold_text = text[snippet["span"][0]:snippet["span"][1]]
@@ -73,8 +92,9 @@ def retrieval_recall(retrieved_chunks: List[str], gold_snippets: List[Dict], k: 
 def load_langchain_pipeline():
     """Load the pre-built LangChain RAG pipeline."""
     embeddings = OpenAIEmbeddings()
+    vectorstore_path = BASE_DIR / "data" / "vectorstores" / "langchain_faiss"
     vectorstore = FAISS.load_local(
-        "./data/vectorstores/langchain_faiss",
+        str(vectorstore_path),
         embeddings,
         allow_dangerous_deserialization=True
     )
@@ -101,7 +121,6 @@ def evaluate_on_benchmark(qa_chain, benchmark: Benchmark, max_cases: int = None)
         test_cases = test_cases[:max_cases]
     
     results = {
-        "exact_matches": [],
         "f1_scores": [],
         "retrieval_recalls": [],
         "latencies": [],
@@ -133,22 +152,22 @@ def evaluate_on_benchmark(qa_chain, benchmark: Benchmark, max_cases: int = None)
         
         # Calculate metrics
         # For multiple gold snippets, use the best match
-        best_em = 0.0
         best_f1 = 0.0
         for gold_text in gold_texts:
-            em = exact_match(answer, gold_text)
             f1 = f1_score(answer, gold_text)
-            best_em = max(best_em, em)
             best_f1 = max(best_f1, f1)
         
         # Retrieval recall
-        recall = retrieval_recall(
-            retrieved_docs,
-            [{"file_path": s.file_path, "span": s.span} for s in test_case.snippets],
-            k=5
-        )
+        # Convert Pydantic objects to dicts for retrieval_recall function
+        snippet_dicts = [
+            {
+                "file_path": s.file_path,
+                "span": list(s.span) if isinstance(s.span, tuple) else s.span
+            }
+            for s in test_case.snippets
+        ]
+        recall = retrieval_recall(retrieved_docs, snippet_dicts, k=5)
         
-        results["exact_matches"].append(best_em)
         results["f1_scores"].append(best_f1)
         results["retrieval_recalls"].append(recall)
         results["latencies"].append(latency)
@@ -157,7 +176,6 @@ def evaluate_on_benchmark(qa_chain, benchmark: Benchmark, max_cases: int = None)
             "query": query,
             "answer": answer,
             "gold_answers": gold_texts,
-            "exact_match": best_em,
             "f1": best_f1,
             "retrieval_recall": recall,
             "latency": latency
@@ -174,23 +192,24 @@ def evaluate_on_benchmark(qa_chain, benchmark: Benchmark, max_cases: int = None)
 # -----------------------------
 
 def main():
-    # Initialize wandb
-    wandb.init(
-        project="legal-rag-evaluation",
-        name="langchain-rag-cuad",
-        config={
-            "framework": "LangChain",
-            "dataset": "CUAD",
-            "model": "gpt-3.5-turbo",
-            "chunk_size": 500,
-            "chunk_overlap": 50,
-            "retrieval_k": 5,
-        }
-    )
+    # Initialize wandb (if available)
+    if WANDB_AVAILABLE:
+        wandb.init(
+            project="legal-rag-evaluation",
+            name="langchain-rag-cuad",
+            config={
+                "framework": "LangChain",
+                "dataset": "CUAD",
+                "model": "gpt-3.5-turbo",
+                "chunk_size": 500,
+                "chunk_overlap": 50,
+                "retrieval_k": 5,
+            }
+        )
     
     # Load benchmark
     print("Loading benchmark...")
-    benchmark_path = "./data/benchmarks/cuad.json"
+    benchmark_path = BASE_DIR / "data" / "benchmarks" / "cuad.json"
     with open(benchmark_path, "r") as f:
         benchmark_data = json.load(f)
     
@@ -207,80 +226,83 @@ def main():
     results = evaluate_on_benchmark(qa_chain, benchmark, max_cases=50)
     
     # Calculate summary statistics
-    avg_em = sum(results["exact_matches"]) / len(results["exact_matches"])
     avg_f1 = sum(results["f1_scores"]) / len(results["f1_scores"])
     avg_recall = sum(results["retrieval_recalls"]) / len(results["retrieval_recalls"])
     avg_latency = sum(results["latencies"]) / len(results["latencies"])
     
-    # Log metrics to wandb
-    wandb.log({
-        "exact_match": avg_em,
-        "f1_score": avg_f1,
-        "retrieval_recall@5": avg_recall,
-        "avg_latency": avg_latency,
-        "num_test_cases": len(results["exact_matches"]),
-    })
+    # Note: exact_match removed from tool-use, but kept here for RAG comparison
+    # avg_em = sum(results.get("exact_matches", [0.0])) / len(results.get("exact_matches", [0.0])) if results.get("exact_matches") else 0.0
     
-    # Log per-case metrics as a table
-    table_data = []
-    for i, detail in enumerate(results["detailed_results"][:10]):  # Log first 10 examples
-        table_data.append([
-            i + 1,
-            detail["query"][:100] + "...",  # Truncate long queries
-            detail["answer"][:100] + "...",  # Truncate long answers
-            detail["exact_match"],
-            detail["f1"],
-            detail["retrieval_recall"],
-            detail["latency"],
-        ])
-    
-    wandb.log({
-        "examples": wandb.Table(
-            columns=["Case", "Query", "Answer", "Exact Match", "F1", "Recall@5", "Latency"],
-            data=table_data
-        )
-    })
-    
-    # Log distribution of scores
-    wandb.log({
-        "exact_match_distribution": wandb.Histogram(results["exact_matches"]),
-        "f1_distribution": wandb.Histogram(results["f1_scores"]),
-        "recall_distribution": wandb.Histogram(results["retrieval_recalls"]),
-        "latency_distribution": wandb.Histogram(results["latencies"]),
-    })
+    # Log metrics to wandb (if available)
+    if WANDB_AVAILABLE:
+        wandb.log({
+            "f1_score": avg_f1,
+            "retrieval_recall@5": avg_recall,
+            "avg_latency": avg_latency,
+            "num_test_cases": len(results["f1_scores"]),
+        })
+        
+        # Log per-case metrics as a table
+        table_data = []
+        for i, detail in enumerate(results["detailed_results"][:10]):  # Log first 10 examples
+            table_data.append([
+                i + 1,
+                detail["query"][:100] + "...",  # Truncate long queries
+                detail["answer"][:100] + "...",  # Truncate long answers
+                detail["f1"],
+                detail["retrieval_recall"],
+                detail["latency"],
+            ])
+        
+        wandb.log({
+            "examples": wandb.Table(
+                columns=["Case", "Query", "Answer", "F1", "Recall@5", "Latency"],
+                data=table_data
+            )
+        })
+        
+        # Log distribution of scores
+        wandb.log({
+            "f1_distribution": wandb.Histogram(results["f1_scores"]),
+            "recall_distribution": wandb.Histogram(results["retrieval_recalls"]),
+            "latency_distribution": wandb.Histogram(results["latencies"]),
+        })
     
     # Print results
     print("\n" + "="*50)
     print("EVALUATION RESULTS")
     print("="*50)
-    print(f"Test Cases: {len(results['exact_matches'])}")
-    print(f"Exact Match: {avg_em:.2%}")
     print(f"F1 Score: {avg_f1:.2%}")
     print(f"Retrieval Recall@5: {avg_recall:.2%}")
     print(f"Avg Latency: {avg_latency:.2f}s")
     print("="*50)
-    print(f"\nResults logged to wandb: {wandb.run.url}")
+    
+    if WANDB_AVAILABLE:
+        print(f"\nResults logged to wandb: {wandb.run.url}")
+        wandb_url = wandb.run.url
+    else:
+        wandb_url = None
     
     # Save detailed results
-    output_path = "./results/langchain_evaluation.json"
-    os.makedirs("./results", exist_ok=True)
+    results_dir = BASE_DIR / "results"
+    results_dir.mkdir(exist_ok=True)
+    output_path = results_dir / "langchain_evaluation.json"
     with open(output_path, "w") as f:
         json.dump({
             "summary": {
-                "num_cases": len(results["exact_matches"]),
-                "exact_match": avg_em,
+                "num_cases": len(results["f1_scores"]),
                 "f1_score": avg_f1,
                 "retrieval_recall": avg_recall,
                 "avg_latency": avg_latency,
-                "wandb_run_url": wandb.run.url,
+                "wandb_run_url": wandb_url,
             },
             "detailed_results": results["detailed_results"]
         }, f, indent=2)
     
     print(f"Detailed results saved to {output_path}")
     
-    # Finish wandb run
-    wandb.finish()
+    if WANDB_AVAILABLE:
+        wandb.finish()
 
 
 if __name__ == "__main__":

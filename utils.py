@@ -145,7 +145,10 @@ async def create_title(
 
 
 def download_zip(name: str, url: str, save_path: str, check_path: str) -> None:
-    if os.path.exists(f"{save_path}/{check_path}"):
+    from pathlib import Path
+    save_path_obj = Path(save_path)
+    check_path_obj = save_path_obj / check_path
+    if check_path_obj.exists():
         print(f"{name} dataset already exists. Skipping download.")
         return
 
@@ -167,11 +170,11 @@ def download_zip(name: str, url: str, save_path: str, check_path: str) -> None:
         print("ERROR, something went wrong")
 
     # Extract the contents of the zip file
-    os.makedirs(save_path, exist_ok=True)
+    save_path_obj.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(zip_file, "r") as zip_ref:
-        zip_ref.extractall(save_path)
+        zip_ref.extractall(save_path_obj)
 
-    if not os.path.exists(f"{save_path}/{check_path}"):
+    if not check_path_obj.exists():
         raise RuntimeError(f"{name} Download Failure! Folder not found.")
 
     print(f"{name} Download and extraction completed successfully.")
