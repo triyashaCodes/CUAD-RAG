@@ -53,16 +53,21 @@ data/
 *.json
 !requirements.txt
 !package.json
+# But keep directory structure
+!data/**/.gitkeep
 
 # Vector stores and embeddings
 *.index
 *.faiss
 vectorstores/
+!vectorstores/.gitkeep
 embeddings/
 
 # Results and outputs
 results/
+!results/.gitkeep
 tmp/
+!tmp/.gitkeep
 *.log
 
 # Wandb
@@ -92,6 +97,11 @@ data/raw_data/
 data/corpus/
 data/benchmarks/
 data/vectorstores/
+# But keep directory structure
+!data/raw_data/.gitkeep
+!data/corpus/.gitkeep
+!data/benchmarks/.gitkeep
+!data/vectorstores/.gitkeep
 
 # Temporary files
 *.tmp
