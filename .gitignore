@@ -48,25 +48,31 @@ venv.bak/
 .ipynb_checkpoints
 
 # Data files (large datasets)
-data/
+# Ignore everything in data/ except .gitkeep files
+# Note: Order matters - exceptions must come after the ignore pattern
+data/**
+!data/
+!data/.gitkeep
+!data/*/
+!data/*/.gitkeep
+!data/*/*/
+!data/*/*/.gitkeep
 *.csv
 *.json
 !requirements.txt
 !package.json
-# But keep directory structure
-!data/**/.gitkeep
 
 # Vector stores and embeddings
 *.index
 *.faiss
-vectorstores/
+vectorstores/*
 !vectorstores/.gitkeep
 embeddings/
 
 # Results and outputs
-results/
+results/*
 !results/.gitkeep
-tmp/
+tmp/*
 !tmp/.gitkeep
 *.log
 
@@ -92,16 +98,8 @@ models/
 ehthumbs.db
 Thumbs.db
 
-# CUAD specific
-data/raw_data/
-data/corpus/
-data/benchmarks/
-data/vectorstores/
-# But keep directory structure
-!data/raw_data/.gitkeep
-!data/corpus/.gitkeep
-!data/benchmarks/.gitkeep
-!data/vectorstores/.gitkeep
+# CUAD specific - these are already covered by data/* above
+# The .gitkeep exceptions will handle directory structure
 
 # Temporary files
 *.tmp
