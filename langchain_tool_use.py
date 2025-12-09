@@ -35,7 +35,7 @@ _vectorstore = None
 # ------------------------------------------------------
 # Tool 1: Extract Dates
 # ------------------------------------------------------
-@tool
+
 def extract_dates(text: str) -> str:
     """Extracts all date expressions from the given legal text.
     
