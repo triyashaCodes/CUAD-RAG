@@ -37,7 +37,16 @@ _vectorstore = None
 # ------------------------------------------------------
 @tool
 def extract_dates(text: str) -> str:
-    """Extracts all date expressions from the given legal text."""
+    """Extracts all date expressions from the given legal text.
+    
+    Use this tool when:
+    - The query asks about dates, expiration dates, renewal terms, deadlines, or time periods
+    - You have contract text and need to find specific dates mentioned in it
+    - Examples: "What is the expiration date?", "When does this contract expire?", "What is the renewal term?"
+    
+    Input: The text from which to extract dates (can be contract text or a clause).
+    Output: A comma-separated list of all dates found in the text.
+    """
     import re
 
     patterns = [
@@ -97,7 +106,7 @@ def rag_retrieve(query: str) -> str:
     if _vectorstore is None:
         raise ValueError("Vectorstore not initialized. Call setup_pipeline first.")
 
-    docs = _vectorstore.similarity_search(query, k=5)
+    docs = _vectorstore.similarity_search(query, k=10)
     if not docs:
         return f"No relevant information found for: {query}"
 
@@ -146,21 +155,13 @@ def setup_pipeline():
     # Tool list
     tools = [extract_dates, summarize_text, rag_retrieve]
 
-    # New agent prompt
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", "You are a legal analysis assistant who uses tools when helpful."),
-        MessagesPlaceholder("chat_history"),
-        ("user", "{input}")
-    ])
-
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
 
     # New agent API
     agent = create_agent(
-        llm=llm,
+        model=llm,
         tools=tools,
-        prompt=prompt
-    )
+        system_prompt="You are a legal analysis assistant who uses tools when helpful.")
 
 
     return agent
